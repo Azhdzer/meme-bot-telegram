@@ -1,12 +1,15 @@
 import asyncio
+import logging
 import os
-from typing import Tuple
 
+from aiogram.exceptions import TelegramEntityTooLarge
 from aiogram.types import FSInputFile
 
 from bot import bot
 from downloaders import download_video
 from utils import add_to_log, processing_tasks, safe_delete_message, safe_send_message
+
+logger = logging.getLogger(__name__)
 
 
 async def process_video_task(
@@ -25,34 +28,138 @@ async def process_video_task(
     processing_tasks.add(task_id)
 
     try:
-        file_path, file_platform, media_type = await download_video(url, platform)
+        logger.info("Начинаем загрузку: %s для @%s", url[:50], username)
+        file_path, file_platform, media_type = await download_video(url, platform, username)
+        logger.info("Загрузка завершена: %s, тип: %s", file_path, media_type)
+        
+        # Проверяем, что файл существует
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Файл не найден после загрузки: {file_path}")
+        
+        file_size = os.path.getsize(file_path)
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if file_size_mb > 48:  # Предупреждение
+            logger.warning(f"Большой файл {file_size_mb:.1f}MB: {file_path}")
+        
+        if file_size == 0:
+            raise ValueError(f"Файл пустой: {file_path}")
+        
         emoji_map = {'TikTok': '🎪', 'Instagram': '📸', 'Youtube': '📺'}
         emoji = emoji_map.get(file_platform, '🎥')
 
-        if media_type == 'image':
-            await bot.send_photo(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
-            await add_to_log(url, "PHOTO", "SENT")
-        else:
-            await bot.send_video(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
-            await add_to_log(url, "VIDEO", "SENT")
+        try:
+            if media_type == 'image':
+                logger.info("Отправляем фото: %s", file_path)
+                await bot.send_photo(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
+                await add_to_log(
+                    url, "PHOTO", "SENT",
+                    username=username, platform=platform
+                )
+            else:
+                logger.info("Отправляем видео: %s", file_path)
+                await bot.send_video(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
+                await add_to_log(
+                    url, "VIDEO", "SENT",
+                    username=username, platform=platform
+                )
+            logger.info("Медиа успешно отправлено")
+        except TelegramEntityTooLarge as e:
+            # Специальная обработка для слишком больших файлов
+            file_size_mb = file_size / (1024 * 1024)
+            error_msg = f"Telegram отклонил файл: {file_size_mb:.2f}MB"
+            logger.error(error_msg)
+            await safe_send_message(
+                chat_id,
+                f"❌ @{username}\n"
+                f"Файл слишком большой для Telegram: {file_size_mb:.2f}MB\n"
+                f"Лимит: 50MB\n"
+                f"Ссылка: {url}"
+            )
+            await add_to_log(
+                url, "TELEGRAM_TOO_LARGE", error_msg,
+                error=str(e), username=username, platform=platform
+            )
+            # Удаляем временные сообщения
+            await safe_delete_message(chat_id, processing_msg_id)
+            await asyncio.sleep(0.5)
+            await safe_delete_message(chat_id, message_id)
+            # Удаляем файл с задержкой (файл может быть ещё открыт)
+            if os.path.exists(file_path):
+                await asyncio.sleep(1)  # Даём время закрыть файл
+                try:
+                    os.remove(file_path)
+                    logger.info("Файл удален после ошибки Telegram: %s", file_path)
+                except Exception as rm_error:
+                    logger.error("Ошибка при удалении файла: %s", rm_error)
+                    # Пробуем ещё раз через секунду
+                    await asyncio.sleep(1)
+                    try:
+                        os.remove(file_path)
+                        logger.info("Файл удален со второй попытки: %s", file_path)
+                    except Exception:
+                        pass
+            return  # Не пробрасываем исключение дальше, чтобы не дублировать сообщения
+        except Exception as send_error:
+            logger.error("Ошибка при отправке медиа: %s", send_error, exc_info=True)
+            raise
 
+        logger.info("Удаляем временные сообщения")
         await safe_delete_message(chat_id, processing_msg_id)
         await asyncio.sleep(0.5)
         await safe_delete_message(chat_id, message_id)
+        
         if os.path.exists(file_path):
             os.remove(file_path)
+            logger.info("Временный файл удален: %s", file_path)
 
     except Exception as e:
+        logger.error("Ошибка в process_video_task: %s", e, exc_info=True)
         await safe_delete_message(chat_id, processing_msg_id)
         error_text = str(e)
-        if "PHOTO" in error_text:
-            await safe_send_message(chat_id, f"{username} TikTok фото: {url}")
-        elif "FILE_TOO_LARGE" in error_text:
-            await safe_send_message(chat_id, f"{username} Файл >50MB: {url}")
-        elif "INSTAGRAM_FAIL" in error_text:
-            await safe_send_message(chat_id, f"{username} Instagram недоступен")
+        
+        # Логируем ошибку
+        await add_to_log(
+            url, "ERROR", error_text[:50],
+            error=error_text, username=username, platform=platform
+        )
+        
+        # Проверяем, не было ли уже отправлено сообщение (например, для TelegramEntityTooLarge)
+        if "Entity Too Large" in error_text or "TELEGRAM_TOO_LARGE" in error_text:
+            # Сообщение уже отправлено в блоке TelegramEntityTooLarge
+            pass
+        elif "PHOTO" in error_text:
+            await safe_send_message(chat_id, f"📸 @{username}\nTikTok фото (только ссылка):\n{url}")
+        elif "FILE_TOO_LARGE" in error_text or "TOO_LARGE" in error_text.upper():
+            await safe_send_message(chat_id, f"❌ @{username}\nФайл слишком большой (>50MB)\nСсылка: {url}")
+        elif "INSTAGRAM_FAIL" in error_text or "INSTAGRAM" in error_text.upper():
+            await safe_send_message(chat_id, f"❌ @{username}\nInstagram недоступен\nСсылка: {url}")
+        elif "TIKTOK_FAIL" in error_text or "TIKTOK" in error_text.upper():
+            await safe_send_message(chat_id, f"❌ @{username}\nTikTok недоступен\nСсылка: {url}")
+        elif "YOUTUBE_FAIL" in error_text or "YOUTUBE" in error_text.upper():
+            await safe_send_message(chat_id, f"❌ @{username}\nYouTube недоступен\nСсылка: {url}")
         else:
-            await safe_send_message(chat_id, f"{username} {platform} ошибка")
+            await safe_send_message(chat_id, f"❌ @{username}\n{platform} ошибка\n{error_text[:150]}\nСсылка: {url}")
+        
+        # Удаляем временные сообщения
+        await safe_delete_message(chat_id, processing_msg_id)
+        await asyncio.sleep(0.5)
+        await safe_delete_message(chat_id, message_id)
+        
+        # Удаляем файл с задержкой
+        if 'file_path' in locals() and os.path.exists(file_path):
+            await asyncio.sleep(1)  # Даём время закрыть файл
+            try:
+                os.remove(file_path)
+                logger.info("Файл удален после ошибки: %s", file_path)
+            except Exception as rm_error:
+                logger.error("Ошибка при удалении файла: %s", rm_error)
+                # Пробуем ещё раз через секунду
+                await asyncio.sleep(1)
+                try:
+                    os.remove(file_path)
+                    logger.info("Файл удален со второй попытки: %s", file_path)
+                except Exception:
+                    pass
     finally:
         if task_id in processing_tasks:
             processing_tasks.remove(task_id)
