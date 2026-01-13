@@ -6,6 +6,20 @@ from typing import Any, Dict, List, Optional, Set
 
 from bot import bot
 
+from contextlib import contextmanager
+import asyncio
+
+@contextmanager
+def username_context(username: str):
+    """Context manager для логирования с username (пустышка если нет в utils)"""
+    old_username = getattr(username_context, 'current_username', None)
+    username_context.current_username = username
+    
+    try:
+        yield username
+    finally:
+        username_context.current_username = old_username
+
 
 logger = logging.getLogger(__name__)
 

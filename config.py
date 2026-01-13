@@ -19,10 +19,11 @@ TIKTOK_APIS = [
 ]
 
 
-INSTAGRAM_REELS_APIS = [
-    "https://igram.world/api/ajaxSearch?url=",  
-    "https://saveinsta.app/api/ajaxSearch?url=",
-    "https://fastdl.app/api/ajaxSearch?url=",
-    "https://instadownloader.co/api?url=",
-    "https://snapinsta.app/api?url="
+INSTAGRAM_APIS = [
+    "https://igram.world/api",
+    "https://indown.io/api",  # ✅ Работает без логина [web:62]
+    "https://sssinstagram.com/api",  # Альтернатива snapinsta [web:64]
+    "https://reelsvideo.io/download",  # Reels HD [web:66]
+    "https://storysaver.net/api"  # Универсальный [web:64]
 ]
+
