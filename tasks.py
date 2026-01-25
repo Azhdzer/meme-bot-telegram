@@ -50,14 +50,14 @@ async def process_video_task(
         try:
             if media_type == 'image':
                 logger.info("Отправляем фото: %s", file_path)
-                await bot.send_photo(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
+                await bot.send_photo(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username} <a href='{url}'>link</a>", parse_mode="HTML")
                 await add_to_log(
                     url, "PHOTO", "SENT",
                     username=username, platform=platform
                 )
             else:
                 logger.info("Отправляем видео: %s", file_path)
-                await bot.send_video(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username}")
+                await bot.send_video(chat_id, FSInputFile(file_path), caption=f"{emoji} @{username} <a href='{url}'>link</a>", parse_mode="HTML")
                 await add_to_log(
                     url, "VIDEO", "SENT",
                     username=username, platform=platform

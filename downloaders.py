@@ -14,13 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-INSTAGRAM_REELS_APIS_2026 = [
-    "https://igram.world/api/ajaxSearch?url=",
-    "https://indown.io/api/download?url=", 
-    "https://sssinstagram.com/api?url=",
-    "https://reelsvideo.io/api/download?url=",
-    "https://storysaver.net/api?url=",
-]
+
 
 async def compress_video_ffmpeg(input_path: str, output_path: str, target_size_mb: float = 40) -> bool:
     """Компрессия видео FFmpeg H.265 → <40MB (Telegram safe)."""
@@ -181,7 +175,7 @@ async def download_instagram(url: str, username: Optional[str] = None) -> Tuple[
     
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35), headers=headers) as session:
         # 🔥 1. НОВЫЕ РАБОЧИЕ API 2026 (замена мёртвых)
-        for i, api_base in enumerate(INSTAGRAM_REELS_APIS_2026, 1):
+        for i, api_base in enumerate(INSTAGRAM_APIS, 1):
             api_name = api_base.split('/')[2]
             api_start = time.time()
             
