@@ -155,7 +155,7 @@ async def handle_message(message: types.Message) -> None:
     for url, platform in urls:
         processing_msg = await bot.send_message(
             message.chat.id,
-            f"⏳ @{username}, {platform}...",
+            f"⏳ {username}, {platform}...",
         )
         asyncio.create_task(
             process_video_task(

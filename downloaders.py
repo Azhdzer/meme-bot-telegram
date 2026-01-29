@@ -3,7 +3,7 @@ import json
 import os
 import re
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union, List, Dict, Any
 import subprocess
 import aiohttp
 import yt_dlp
@@ -55,76 +55,184 @@ async def download_file(url: str, filename: str, session: aiohttp.ClientSession,
             return filename
     raise Exception("FILE_DOWNLOAD_FAIL")
 
-async def download_tiktok(url: str, username: Optional[str] = None) -> Tuple[str, str]:
+async def download_tiktok(url: str, username: Optional[str] = None) -> Tuple[Union[str, Dict], str]:
     """TikTok: API → AutoCompress → yt-dlp fallback"""
     os.makedirs('downloads', exist_ok=True)
     start_time = time.time()
     
     # Photo skip
-    if '/photo/' in url.lower():
-        await add_to_log(url, "TikTok фото", "ОСТАВЛЯЕМ ССЫЛКУ", username=username, platform="tiktok")
-        raise Exception("PHOTO")
+    # Photo skip removed
+    # if '/photo/' in url.lower():
+    #     await add_to_log(url, "TikTok фото", "ОСТАВЛЯЕМ ССЫЛКУ", username=username, platform="tiktok")
+    #     raise Exception("PHOTO")
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25), headers=headers) as session:
-        # 1️⃣ API попытки (ваш оригинальный код)
+        video_candidate = None
+        
+        # 1️⃣ API попытки (с приоритетом слайдшоу)
         for i, api_base in enumerate(TIKTOK_APIS, 1):
             api_name = api_base.split('/')[2] if '/' in api_base else api_base[:30]
             api_start = time.time()
             
             try:
-                await add_to_log(url, f"TikTok API {i}", f"Попытка {i}/{len(TIKTOK_APIS)}",
-                               username=username, api=api_name, platform="tiktok")
+                # Log only if it's the first attempt or if we don't have a candidate yet
+                if not video_candidate:
+                    await add_to_log(url, f"TikTok API {i}", f"Checking...",
+                                   username=username, api=api_name, platform="tiktok")
                 
                 async with session.get(api_base + url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get('code') == 0:
-                            video_url = data['data']['play']
-                            short_id = re.search(r'tiktok.com/([^\s/]+)', url).group(1)[:8] if 'tiktok.com' in url else os.urandom(6).hex()
-                            raw_filename = f"downloads/tiktok_raw_{short_id}.mp4"
                             
-                            # Скачиваем
-                            file_path = await download_file(video_url, raw_filename, session, headers)
-                            
-                            # ✅ АВТОКОМПРЕССИЯ >40MB
-                            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-                            final_filename = file_path
-                            
-                            if file_size_mb > 40:
-                                await add_to_log(url, "TikTok RAW", f"{file_size_mb:.1f}MB → COMPRESS",
+                            # 📸 SLIDESHOW (IMAGES) - IMMEDIATE SUCCESS
+                            if data['data'].get('images'):
+                                try:
+                                    images = data['data']['images']
+                                    music_url = data['data']['music']
+                                    short_id = re.search(r'tiktok.com/([^\s/]+)', url).group(1)[:8] if 'tiktok.com' in url else os.urandom(6).hex()
+                                    
+                                    await add_to_log(url, f"TikTok API {i}", f"SLIDESHOW: {len(images)} imgs",
+                                                   username=username, api=api_name, platform="tiktok")
+                                    
+                                    # Скачиваем картинки
+                                    image_paths = []
+                                    for idx, img_url in enumerate(images):
+                                        img_filename = f"downloads/tiktok_slide_{short_id}_{idx}.jpg"
+                                        await download_file(img_url, img_filename, session, headers)
+                                        image_paths.append(img_filename)
+                                    
+                                    # Скачиваем музыку
+                                    audio_path = f"downloads/tiktok_audio_{short_id}.mp3"
+                                    await download_file(music_url, audio_path, session, headers)
+                                    
+                                    total_time = time.time() - start_time
+                                    await add_to_log(url, f"TikTok API {i}", f"SLIDESHOW OK {len(image_paths)} pics",
+                                                   username=username, api=api_name, platform="tiktok", duration=total_time)
+                                    
+                                    return {'images': image_paths, 'audio': audio_path}, 'slideshow'
+                                    
+                                except Exception as e:
+                                    logger.error(f"Slideshow download error: {e}")
+                                    # Continue searching...
+                                    
+                            # 📹 VIDEO FOUND - STORE CANDIDATE
+                            if not video_candidate:
+                                video_url = data['data']['play']
+                                short_id = re.search(r'tiktok.com/([^\s/]+)', url).group(1)[:8] if 'tiktok.com' in url else os.urandom(6).hex()
+                                video_candidate = {
+                                    'url': video_url,
+                                    'id': short_id,
+                                    'api': api_name,
+                                    'i': i
+                                }
+                                # Don't return yet! Look for slideshow in other APIs
+                                await add_to_log(url, f"TikTok API {i}", f"Video found (looking for slides...)",
                                                username=username, api=api_name, platform="tiktok")
-                                compressed_filename = file_path.replace('raw_', 'opt_')
-                                
-                                if await compress_video_ffmpeg(file_path, compressed_filename):
-                                    os.remove(file_path)
-                                    final_filename = compressed_filename
-                                else:
-                                    # Fallback trim
-                                    trimmed_filename = file_path.replace('raw_', 'trim_')
-                                    subprocess.run([
-                                        'ffmpeg', '-y', '-i', file_path, '-t', '180', '-c', 'copy', trimmed_filename
-                                    ], capture_output=True)
-                                    os.remove(file_path)
-                                    final_filename = trimmed_filename
-                            
-                            total_time = time.time() - start_time
-                            final_size_mb = os.path.getsize(final_filename) / (1024 * 1024)
-                            await add_to_log(url, f"TikTok API {i}", f"VIDEO OK {final_size_mb:.1f}MB ✓",
-                                           username=username, api=api_name, platform="tiktok", duration=total_time)
-                            return final_filename, 'video'
                             
             except Exception as e:
-                api_time = time.time() - api_start
-                await add_to_log(url, f"TikTok API {i}", f"FAIL ({str(e)[:30]})",
-                               error=str(e)[:50], username=username, api=api_name,
-                               platform="tiktok", duration=api_time)
-                await asyncio.sleep(0.5)
+                pass # Silent fail during search
+                
+        # 🏁 LOOP FINISHED - CHECK CANDIDATE
+        if video_candidate:
+            try:
+                vc = video_candidate
+                raw_filename = f"downloads/tiktok_raw_{vc['id']}.mp4"
+                
+                # Скачиваем
+                file_path = await download_file(vc['url'], raw_filename, session, headers)
+                
+                # ✅ АВТОКОМПРЕССИЯ >40MB
+                file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                final_filename = file_path
+                
+                if file_size_mb > 40:
+                    await add_to_log(url, "TikTok RAW", f"{file_size_mb:.1f}MB → COMPRESS",
+                                   username=username, api=vc['api'], platform="tiktok")
+                    compressed_filename = file_path.replace('raw_', 'opt_')
+                    
+                    if await compress_video_ffmpeg(file_path, compressed_filename):
+                        os.remove(file_path)
+                        final_filename = compressed_filename
+                    else:
+                        # Fallback trim
+                        trimmed_filename = file_path.replace('raw_', 'trim_')
+                        subprocess.run([
+                            'ffmpeg', '-y', '-i', file_path, '-t', '180', '-c', 'copy', trimmed_filename
+                        ], capture_output=True)
+                        os.remove(file_path)
+                        final_filename = trimmed_filename
+                
+                total_time = time.time() - start_time
+                final_size_mb = os.path.getsize(final_filename) / (1024 * 1024)
+                await add_to_log(url, f"TikTok API {vc['i']}", f"VIDEO OK {final_size_mb:.1f}MB ✓",
+                               username=username, api=vc['api'], platform="tiktok", duration=total_time)
+                return final_filename, 'video'
+            except Exception as e:
+                 logger.error(f"Video candidate download failed: {e}")
+                 # Fallback to YT-DLP if candidate failed logic
         
         # 2️⃣ YT-DLP FALLBACK (100% работает)
         await add_to_log(url, "YT-DLP", "TikTok FAILBACK START", username=username, platform="tiktok")
         try:
+            # Сначала получаем инфо без скачивания
+            info_opts = {'quiet': True, 'extract_flat': False}
+            
+            def get_info():
+                with yt_dlp.YoutubeDL(info_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+            
+            info = await asyncio.to_thread(get_info)
+            
+            # 📸 SLIDESHOW CHECK (YT-DLP)
+            if info.get('_type') == 'playlist' or (info.get('entries') and len(info['entries']) > 0):
+                 await add_to_log(url, "YT-DLP", "SLIDESHOW DETECTED", username=username, platform="tiktok")
+                 
+                 image_urls = []
+                 # Пытаемся найти картинки
+                 if info.get('entries'):
+                     for entry in info['entries']:
+                         # yt-dlp для tiktok slideshow часто возвращает список, где каждое entry - это url картинки или видео
+                         if entry.get('url'):
+                             image_urls.append(entry['url'])
+                         elif entry.get('thumbnails'): # Иногда тут
+                             image_urls.append(entry['thumbnails'][-1]['url'])
+
+                 # Если не нашли в entries, иногда они в formats (редко для yt-dlp slideshow)
+                 
+                 if image_urls:
+                     image_paths = []
+                     for idx, img_url in enumerate(image_urls):
+                         filename = f"downloads/tiktok_yt_{os.urandom(6).hex()}_{idx}.jpg"
+                         await download_file(img_url, filename, session, headers)
+                         image_paths.append(filename)
+                     
+                     # Audio
+                     audio_path = None
+                     # Пытаемся найти аудио ссылку
+                     # Часто в info есть 'requested_downloads' или 'url' pointing to mp3 if extracted
+                     # Для простоты, попробуем скачать аудио отдельно через yt-dlp 'bestaudio'
+                     
+                     audio_opts = {
+                        'format': 'bestaudio/best',
+                        'outtmpl': f'downloads/tiktok_audio_yt_{os.urandom(6).hex()}.%(ext)s',
+                        'quiet': True,
+                     }
+                     
+                     def download_audio():
+                        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+                            return ydl.prepare_filename(ydl.extract_info(url, download=True))
+
+                     try:
+                         audio_path = await asyncio.to_thread(download_audio)
+                     except Exception as e:
+                         logger.warning(f"Audio download failed: {e}")
+
+                     return {'images': image_paths, 'audio': audio_path}, 'slideshow'
+
+            # Если не слайдшоу, качаем как видео
             ydl_opts = {
                 'format': 'best[height<=720][ext=mp4]/best',
                 'outtmpl': f'downloads/tiktok_fallback_{os.urandom(6).hex()}.%(ext)s',
@@ -410,7 +518,7 @@ async def download_youtube(url: str, username: Optional[str] = None) -> Tuple[st
         await add_to_log(url, "YouTube FAIL", str(e)[:30], username=username, api="yt-dlp", platform="youtube")
         raise Exception("YOUTUBE_FAIL")
 
-async def download_video(url: str, platform: str, username: Optional[str] = None) -> Tuple[str, str, str]:
+async def download_video(url: str, platform: str, username: Optional[str] = None) -> Tuple[Union[str, Dict], str, str]:
     """Главная точка входа (роутинг + полный fallback)"""
     await add_to_log(url, platform.upper(), "START", username=username, platform=platform)
     
