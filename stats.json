@@ -281,6 +281,38 @@
       "username": "Azhder_Artsiom",
       "platform": "instagram",
       "reactions": {}
+    },
+    "-4577216890:1904": {
+      "url": "https://www.instagram.com/reels/DSGJ0w-jXL6/",
+      "username": "UladRH",
+      "platform": "instagram",
+      "reactions": {}
+    },
+    "-1002914186191:2279": {
+      "url": "https://www.instagram.com/reel/DUBc7a3DCaL/",
+      "username": "kyxt_tv",
+      "platform": "instagram",
+      "reactions": {}
+    },
+    "-1003513470407:144": {
+      "url": "https://www.instagram.com/reels/DUBc7a3DCaL/?igsh=NGRramMzZ2NzZ2F6",
+      "username": "Azhder_Artsiom",
+      "platform": "instagram",
+      "reactions": {}
+    },
+    "-4577216890:1917": {
+      "url": "https://www.instagram.com/reels/DUBc7a3DCaL/?igsh=NGRramMzZ2NzZ2F6",
+      "username": "Azhder_Artsiom",
+      "platform": "instagram",
+      "reactions": {
+        "👍": 1
+      }
+    },
+    "-1003513470407:147": {
+      "url": "https://www.instagram.com/reels/DUBc7a3DCaL/?igsh=NGRramMzZ2NzZ2F6",
+      "username": "Azhder_Artsiom",
+      "platform": "instagram",
+      "reactions": {}
     }
   },
   "global": {
@@ -290,6 +322,7 @@
     "🌚": 1,
     "😎": 1,
     "🔥": 1,
-    "😢": 1
+    "😢": 1,
+    "👍": 1
   }
 }

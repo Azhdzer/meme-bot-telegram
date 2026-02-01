@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import os
 from typing import List
@@ -63,7 +64,7 @@ async def process_video_task(
         # Construct final caption
         base_caption = f"{emoji} <b><i>{username}</i></b> <a href='{url}'>link</a>"
         if user_caption:
-            base_caption += f"\n\n{user_caption}"
+            base_caption += f"\n\n<b>{html.escape(user_caption)}</b>"
 
         try:
             sent_msg = None

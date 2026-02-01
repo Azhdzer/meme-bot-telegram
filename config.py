@@ -4,9 +4,9 @@ import re
 API_TOKEN = os.getenv("BOT_TOKEN", "8334248088:AAGH5M6-mSKjk9tknycGgBEFRUi-QB6B5s4")
 
 url_patterns = {
-    'tiktok': re.compile(r"https?://(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|(?:www\.)?tiktok\.com)/[\w/]+", re.IGNORECASE),
-    'youtube': re.compile(r"https?://(?:www\.)?(?:youtube\.com/(?:shorts|watch\?v=|embed|v)|youtu\.be)/[\w?=&-]+", re.IGNORECASE),
-    'instagram': re.compile(r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/[^/\s?]{5,}/?", re.IGNORECASE)
+    'tiktok': re.compile(r"https?://(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|(?:www\.)?tiktok\.com)/[\w/]+(?:\?[^\s]*)?", re.IGNORECASE),
+    'youtube': re.compile(r"https?://(?:www\.)?(?:youtube\.com/(?:shorts|watch\?v=|embed|v)|youtu\.be)/[\w?=&-]+(?:\?[^\s]*)?", re.IGNORECASE),
+    'instagram': re.compile(r"https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/[^/\s?]{5,}/?(?:\?[^\s]*)?", re.IGNORECASE)
 }
 
 TIKTOK_APIS = [
