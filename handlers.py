@@ -9,9 +9,31 @@ from bot import bot, dp
 from config import url_patterns
 from tasks import process_video_task
 from utils import add_to_log, download_log, format_log_entry, safe_send_message
-
+import stats
 
 logger = logging.getLogger(__name__)
+
+
+@dp.message_reaction()
+async def handle_reaction(event: types.MessageReactionUpdated):
+    """Слушаем реакции"""
+    await stats.handle_reaction(event)
+
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: types.Message):
+    """Показать статистику по реакциям"""
+    text = stats.get_stats_report()
+    await message.answer(text, parse_mode="HTML")
+
+
+@dp.message(Command("set_report_chat"))
+async def cmd_set_report_chat(message: types.Message):
+    """Установить этот чат для еженедельных отчетов"""
+    stats.set_report_chat_id(message.chat.id)
+    await safe_send_message(message.chat.id, "✅ Чат установлен для еженедельных отчетов (Воскресенье 20:00 PL)")
+
+
 
 
 @dp.message(Command("start"))
@@ -152,6 +174,12 @@ async def handle_message(message: types.Message) -> None:
     logger.info("User @%s: %d ссылок", username, len(urls))
     # Не логируем пустой URL, это просто информационное сообщение
 
+    # Extract user text checks (remove urls from text)
+    user_caption = text
+    for url, _ in urls:
+        user_caption = user_caption.replace(url, "")
+    user_caption = user_caption.strip()
+
     for url, platform in urls:
         processing_msg = await bot.send_message(
             message.chat.id,
@@ -165,6 +193,7 @@ async def handle_message(message: types.Message) -> None:
                 url,
                 username,
                 platform,
+                user_caption=user_caption,
             )
         )
 

@@ -443,6 +443,11 @@ async def download_instagram(url: str, username: Optional[str] = None) -> Tuple[
                 'format': 'best[filesize<50M][height<=720]/best',
                 'outtmpl': f'downloads/instagram_yt_{os.urandom(6).hex()}.%(ext)s',
                 'quiet': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'ios']
+                    }
+                }
             }
             
             def run_yt_dlp():
@@ -485,6 +490,11 @@ async def download_youtube(url: str, username: Optional[str] = None) -> Tuple[st
         'format': 'best[filesize<50M][height<=720]/best',
         'outtmpl': f'downloads/youtube_{os.urandom(6).hex()}.%(ext)s',
         'quiet': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']
+            }
+        }
     }
     
     try:

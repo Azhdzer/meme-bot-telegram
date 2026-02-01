@@ -10,6 +10,9 @@ from bot import bot
 from downloaders import download_video
 from utils import add_to_log, processing_tasks, safe_delete_message, safe_send_message
 
+from utils import add_to_log, processing_tasks, safe_delete_message, safe_send_message
+import stats
+
 logger = logging.getLogger(__name__)
 
 # Type alias for clarity
@@ -23,6 +26,7 @@ async def process_video_task(
     url: str,
     username: str,
     platform: str,
+    user_caption: str = "",
 ) -> None:
     """Фоновая задача: скачать видео и отправить его пользователю."""
     task_id = f"{chat_id}_{hash(url)}"
@@ -55,11 +59,17 @@ async def process_video_task(
         
         emoji_map = {'TikTok': '🎪', 'Instagram': '📸', 'Youtube': '📺'}
         emoji = emoji_map.get(file_platform, '🎥')
+        
+        # Construct final caption
+        base_caption = f"{emoji} <b><i>{username}</i></b> <a href='{url}'>link</a>"
+        if user_caption:
+            base_caption += f"\n\n{user_caption}"
 
         try:
+            sent_msg = None
             if media_type == 'image':
                 logger.info("Отправляем фото: %s", file_path)
-                await bot.send_photo(chat_id, FSInputFile(file_path), caption=f"{emoji} <b><i>{username}</i></b> <a href='{url}'>link</a>", parse_mode="HTML")
+                sent_msg = await bot.send_photo(chat_id, FSInputFile(file_path), caption=base_caption, parse_mode="HTML")
                 await add_to_log(
 
                     url, "PHOTO", "SENT",
@@ -76,14 +86,16 @@ async def process_video_task(
                 media_group = []
                 for idx, img_path in enumerate(images):
                     if idx == 0:
-                        media = InputMediaPhoto(media=FSInputFile(img_path), caption=f"{emoji} <b><i>{username}</i></b> <a href='{url}'>link</a>", parse_mode="HTML")
+                        media = InputMediaPhoto(media=FSInputFile(img_path), caption=base_caption, parse_mode="HTML")
                     else:
                         media = InputMediaPhoto(media=FSInputFile(img_path))
                     media_group.append(media)
                 
                 # Отправляем альбом
                 if media_group:
-                   await bot.send_media_group(chat_id, media_group)
+                   msgs = await bot.send_media_group(chat_id, media_group)
+                   if msgs:
+                       sent_msg = msgs[0] # Register first message of album
                 
                 # Отправляем аудио
                 if audio and os.path.exists(audio):
@@ -96,11 +108,16 @@ async def process_video_task(
 
             else:
                 logger.info("Отправляем видео: %s", file_path)
-                await bot.send_video(chat_id, FSInputFile(file_path), caption=f"{emoji} <b><i>{username}</i></b> <a href='{url}'>link</a>", parse_mode="HTML")
+                sent_msg = await bot.send_video(chat_id, FSInputFile(file_path), caption=base_caption, parse_mode="HTML")
                 await add_to_log(
                     url, "VIDEO", "SENT",
                     username=username, platform=platform
                 )
+            
+            # 📊 REGISTER STATS
+            if sent_msg:
+                await stats.register_message(chat_id, sent_msg.message_id, url, username, platform)
+                
             logger.info("Медиа успешно отправлено")
         except TelegramEntityTooLarge as e:
             # Специальная обработка для слишком больших файлов
