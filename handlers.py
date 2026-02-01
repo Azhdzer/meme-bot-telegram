@@ -156,9 +156,9 @@ async def cmd_log(message: types.Message) -> None:
     await safe_send_message(message.chat.id, log_text)
 
 
-@dp.message(F.text)
+@dp.message(F.text | F.caption)
 async def handle_message(message: types.Message) -> None:
-    text = message.text
+    text = message.text or message.caption
     if not text or text.startswith('/'):
         return
 
