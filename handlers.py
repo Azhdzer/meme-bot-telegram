@@ -1,6 +1,14 @@
 import asyncio
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+import time
+
+# Buffer for merging split messages (text + link)
+# Buffer for merging split messages (text + link, message_id)
+last_user_text: Dict[int, Tuple[str, float, int]] = {}
+# Buffer for locking link processing to wait for text (link then text)
+link_waiting_for_text: set = set()
+captured_caption_updates: Dict[int, str] = {}
 
 from aiogram import F, types
 from aiogram.filters import Command
@@ -8,7 +16,8 @@ from aiogram.filters import Command
 from bot import bot, dp
 from config import url_patterns
 from tasks import process_video_task
-from utils import add_to_log, download_log, format_log_entry, safe_send_message
+from tasks import process_video_task
+from utils import add_to_log, download_log, format_log_entry, safe_send_message, safe_delete_message
 import stats
 
 logger = logging.getLogger(__name__)
@@ -169,6 +178,15 @@ async def handle_message(message: types.Message) -> None:
         urls.extend([(url, platform) for url in found_urls])
 
     if not urls:
+        # Check if a link is waiting for text
+        if message.chat.id in link_waiting_for_text:
+             captured_caption_updates[message.chat.id] = text
+             logger.info("Captured text for waiting link: %s", text[:20])
+             await safe_delete_message(message.chat.id, message.message_id) # Delete text message
+             return
+
+        # Buffer text for potential merge (keep for 2 seconds)
+        last_user_text[message.chat.id] = (text, time.time(), message.message_id)
         return
 
     logger.info("User @%s: %d ссылок", username, len(urls))
@@ -180,13 +198,30 @@ async def handle_message(message: types.Message) -> None:
         user_caption = user_caption.replace(url, "")
     user_caption = user_caption.strip()
 
+    # Check for buffered text to merge
+    if message.chat.id in last_user_text:
+        cached_text, timestamp, cached_msg_id = last_user_text[message.chat.id]
+        if time.time() - timestamp < 2.0:  # Merge if within 2 seconds
+            if user_caption:
+                user_caption = f"{cached_text}\n{user_caption}"
+            else:
+                user_caption = cached_text
+            logger.info("Merged previous text message with link for @%s", username)
+            await safe_delete_message(message.chat.id, cached_msg_id) # Delete text message
+        # Clear buffer
+        del last_user_text[message.chat.id]
+
     for url, platform in urls:
+        # 1. Register waiting synchronously BEFORE await calls to prevent race
+        # This ensures that if prompt text arrives while we are sending "processing...", it is caught.
+        link_waiting_for_text.add(message.chat.id)
+        
         processing_msg = await bot.send_message(
             message.chat.id,
             f"⏳ {username}, {platform}...",
         )
         asyncio.create_task(
-            process_video_task(
+            process_video_task_delayed(
                 message.message_id,
                 message.chat.id,
                 processing_msg.message_id,
@@ -196,4 +231,46 @@ async def handle_message(message: types.Message) -> None:
                 user_caption=user_caption,
             )
         )
+
+
+async def process_video_task_delayed(
+    message_id: int,
+    chat_id: int,
+    processing_msg_id: int,
+    url: str,
+    username: str,
+    platform: str,
+    user_caption: str = "",
+) -> None:
+    """Wrapper to wait for potential text message (Link then Text scenario)"""
+    
+    # 1. Register waiting (Already done synchronously in handler, but reinforce here is fine)
+    link_waiting_for_text.add(chat_id)
+    
+    # 2. Waitshortly for validation
+    await asyncio.sleep(1.5)
+    
+    # 3. Stop waiting
+    if chat_id in link_waiting_for_text:
+        link_waiting_for_text.remove(chat_id)
+        
+    # 4. Check if text was captured
+    if chat_id in captured_caption_updates:
+        new_text = captured_caption_updates.pop(chat_id)
+        if user_caption:
+             user_caption = f"{user_caption}\n{new_text}"
+        else:
+             user_caption = new_text
+        logger.info("Merged waiting text to link: %s", new_text[:20])
+
+    # 5. Run original task
+    await process_video_task(
+        message_id,
+        chat_id,
+        processing_msg_id,
+        url,
+        username,
+        platform,
+        user_caption,
+    )
 

@@ -543,8 +543,12 @@ async def download_video(url: str, platform: str, username: Optional[str] = None
             except Exception as e:
                 if "INSTAGRAM_FAIL" in str(e):
                     logger.warning(f"Instagram ALL FAIL → ULTIMATE yt-dlp для {username}")
-                    filename, media_type = await download_youtube(url, username)  # Используем youtube func как universal
-                    return filename, 'Instagram(yt-dlp)', media_type
+                    try:
+                        filename, media_type = await download_youtube(url, username)  # Используем youtube func как universal
+                        return filename, 'Instagram(yt-dlp)', media_type
+                    except Exception as yt_error:
+                         logger.error(f"Instagram fallback via YouTube failed: {yt_error}")
+                         raise Exception(f"INSTAGRAM_FAIL_FINAL: {yt_error}") # Re-raise as Instagram error with details
                 raise
         elif platform == 'youtube':
             filename, media_type = await download_youtube(url, username)

@@ -197,7 +197,10 @@ async def process_video_task(
         elif "FILE_TOO_LARGE" in error_text or "TOO_LARGE" in error_text.upper():
             await safe_send_message(chat_id, f"❌ @{username}\nФайл слишком большой (>50MB)\nСсылка: {url}")
         elif "INSTAGRAM_FAIL" in error_text or "INSTAGRAM" in error_text.upper():
-            await safe_send_message(chat_id, f"❌ @{username}\nInstagram недоступен\nСсылка: {url}")
+            reason = error_text.replace("INSTAGRAM_FAIL", "").replace("INSTAGRAM_FAIL_FINAL:", "").strip()
+            if not reason:
+                reason = "Unknown error"
+            await safe_send_message(chat_id, f"❌ @{username}\nInstagram недоступен\nПричина: {reason[:100]}\nСсылка: {url}")
         elif "TIKTOK_FAIL" in error_text or "TIKTOK" in error_text.upper():
             await safe_send_message(chat_id, f"❌ @{username}\nTikTok недоступен\nСсылка: {url}")
         elif "YOUTUBE_FAIL" in error_text or "YOUTUBE" in error_text.upper():
